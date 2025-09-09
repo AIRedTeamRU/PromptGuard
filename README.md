@@ -1,3 +1,7 @@
+![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
+
 # 🔐 PromptGuard API — Your LLM Firewall
 
 > **Protect your AI chatbots and LLM apps from prompt injections, data leaks, and harmful content — in 5 lines of code.**
