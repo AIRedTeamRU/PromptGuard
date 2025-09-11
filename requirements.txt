@@ -4,6 +4,7 @@ python-dotenv==1.0.1
 
 pydantic==2.6.0
 presidio-analyzer
-presidio-anonymizer==0.7.0
+presidio-anonymizer
+
 
 
