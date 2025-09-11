@@ -3,5 +3,6 @@ uvicorn==0.29.0
 python-dotenv==1.0.1
 
 pydantic==2.6.0
-presidio-analyzer==0.7.0
+presidio-analyzer==0.6.1
 presidio-anonymizer==0.7.0
+
