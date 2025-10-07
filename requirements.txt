@@ -5,8 +5,7 @@ pydantic==2.9.2
 pydantic-core>=2.18.0
 presidio-anonymizer
 wheels/presidio_analyzer-2.2.360-py3-none-any.whl
-torch
-transformers
+
 
 
 
