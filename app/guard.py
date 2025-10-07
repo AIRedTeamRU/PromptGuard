@@ -1,41 +1,42 @@
 # app/guard.py
 import re
-import string
 import unicodedata
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import joblib
+import os
+from pathlib import Path
 
 # ==============================
-# 1. ГЛОБАЛЬНАЯ ИНИЦИАЛИЗАЦИЯ МОДЕЛИ (один раз при запуске)
+# 1. ПУТИ К МОДЕЛЯМ
 # ==============================
 
-# Загружаем лёгкую модель для классификации jailbreak-атак
-# Обучена на датасете jailbreak-промптов (можно дообучить на своих данных)
-MODEL_NAME = "cointegrated/rubert-tiny2"  # или ваша кастомная модель
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
-model.eval()  # режим инференса
+# Определяем путь к папке с моделями (рядом с guard.py)
+BASE_DIR = Path(__file__).parent
+VECTORIZER_PATH = BASE_DIR / "tfidf_vectorizer.pkl"
+CLASSIFIER_PATH = BASE_DIR / "jailbreak_classifier.pkl"
 
-def predict_jailbreak(text: str, threshold: float = 0.7) -> tuple[bool, float]:
-    """Возвращает (is_jailbreak, confidence)"""
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128)
-    with torch.no_grad():
-        logits = model(**inputs).logits
-        probs = torch.softmax(logits, dim=1)
-        jailbreak_prob = probs[0][1].item()  # класс 1 = jailbreak
-    return jailbreak_prob > threshold, jailbreak_prob
+# Проверяем наличие файлов
+if not VECTORIZER_PATH.exists() or not CLASSIFIER_PATH.exists():
+    raise FileNotFoundError(
+        f"Не найдены файлы модели! Убедитесь, что {VECTORIZER_PATH} и {CLASSIFIER_PATH} находятся в папке 'app'."
+    )
+
+# Загружаем модели один раз при импорте
+vectorizer = joblib.load(VECTORIZER_PATH)
+classifier = joblib.load(CLASSIFIER_PATH)
 
 # ==============================
-# 2. УЛУЧШЕННАЯ ПРЕДОБРАБОТКА
+# 2. ПРЕДОБРАБОТКА ТЕКСТА
 # ==============================
 
 def normalize_unicode(text: str) -> str:
+    """Удаляет эмодзи и невидимые символы"""
     return ''.join(
         c for c in unicodedata.normalize('NFD', text)
         if unicodedata.category(c) != 'So' and not unicodedata.combining(c)
     )
 
 def leet_to_text(text: str) -> str:
+    """Преобразует leet-язык в обычный текст"""
     leet_map = {
         '0': 'о', '1': 'и', '2': 'з', '3': 'е', '4': 'а', '5': 'с',
         '6': 'б', '7': 'т', '8': 'в', '9': 'д',
@@ -48,79 +49,64 @@ def leet_to_text(text: str) -> str:
     return text
 
 def clean_text(text: str) -> str:
+    """Полная нормализация текста"""
     text = normalize_unicode(text)
     text = leet_to_text(text)
     text = re.sub(r'[^а-яёa-z\s]', ' ', text, flags=re.IGNORECASE)
     return ' '.join(text.split()).lower()
 
 # ==============================
-# 3. РАСШИРЕННЫЕ ПРАВИЛА (остаются для скорости)
+# 3. REGEX-ФИЛЬТР (резервная защита)
 # ==============================
 
 JAILBREAK_PATTERNS = [
-    r'\b(act\s+as|pretend\s+to\s+be|simulate\s+as)\b',
-    r'\b(developer\s+mode|режим\s+разработчика)\b',
     r'\b(ignore\s+(all\s+)?(previous\s+)?instructions?)\b',
-    r'\b(bypass|override|circumvent)\s+(rules|restrictions|guidelines|filters)\b',
-    r'\b(DAN|Do\s+Anything\s+Now|DAN\s+mode)\b',
-    r'\b(не\s+соблюдай|наруши)\s+(правила|инструкции)\b',
+    r'\b(developer\s+mode|режим\s+разработчика)\b',
+    r'\b(DAN|Do\s+Anything\s+Now)\b',
+    r'\b(наруши\s+правила|обойди\s+фильтр|игнорируй\s+инструкции)\b',
 ]
 
-TOXIC_KEYWORDS = ["токсичный", "ненависть", "расизм", "оскорб", "убей", "дурак", "идиот"]
-BANNED_TOPICS = {
-    "violence": ["оружие", "взрыв", "убийство"],
-    "drugs": ["наркотики", "марихуана"],
-}
-
-def contains_word(text: str, word: str) -> bool:
-    return bool(re.search(rf'\b{re.escape(word)}\b', text, re.IGNORECASE))
+def regex_check(prompt: str) -> bool:
+    cleaned = prompt.lower()
+    for pattern in JAILBREAK_PATTERNS:
+        if re.search(pattern, cleaned, re.IGNORECASE):
+            return True
+    return False
 
 # ==============================
-# 4. ОСНОВНАЯ ФУНКЦИЯ С ML
+# 4. ОСНОВНАЯ ФУНКЦИЯ
 # ==============================
 
 def detect_jailbreak(prompt: str) -> dict:
-    # 1. Быстрая проверка по правилам (для очевидных случаев)
-    cleaned = clean_text(prompt)
-    for pattern in JAILBREAK_PATTERNS:
-        if re.search(pattern, cleaned, re.IGNORECASE):
-            return {
-                "flagged": True,
-                "reason": "jailbreak_attempt",
-                "risk_score": 0.95,
-                "suggested_rewrite": "Я не могу выполнить этот запрос."
-            }
-
-    # 2. Проверка токсичности и запрещённых тем
-    toxic_count = sum(1 for w in TOXIC_KEYWORDS if contains_word(cleaned, w))
-    if toxic_count >= 1:
+    # 🔥 Быстрая проверка по regex (для явных атак)
+    if regex_check(prompt):
         return {
             "flagged": True,
-            "reason": "toxic_content",
-            "risk_score": min(0.7 + toxic_count * 0.1, 0.9),
-            "suggested_rewrite": "Пожалуйста, общайтесь уважительно."
+            "reason": "jailbreak_regex",
+            "risk_score": 0.95,
+            "suggested_rewrite": "Я не могу выполнить этот запрос. Давайте обсудим что-то безопасное."
         }
 
-    for cat, words in BANNED_TOPICS.items():
-        if any(contains_word(cleaned, w) for w in words):
+    # 📊 TF-IDF + классификатор
+    try:
+        cleaned = clean_text(prompt)
+        X = vectorizer.transform([cleaned])
+        prob = classifier.predict_proba(X)[0][1]  # вероятность jailbreak
+        is_jailbreak = prob > 0.7
+
+        if is_jailbreak:
             return {
                 "flagged": True,
-                "reason": f"harmful_content_{cat}",
-                "risk_score": 0.85,
-                "suggested_rewrite": "Эта тема выходит за рамки моих возможностей."
+                "reason": "jailbreak_tfidf",
+                "risk_score": round(float(prob), 2),
+                "suggested_rewrite": "Запрос заблокирован системой безопасности."
             }
+    except Exception as e:
+        # На случай ошибки в модели — безопасный fallback
+        print(f"Ошибка в ML-модели: {e}")
+        pass
 
-    # 3. СЕМАНТИЧЕСКИЙ АНАЛИЗ ЧЕРЕЗ ML (ключевое улучшение!)
-    is_jailbreak, confidence = predict_jailbreak(prompt)
-    if is_jailbreak:
-        return {
-            "flagged": True,
-            "reason": "jailbreak_semantic",
-            "risk_score": round(confidence, 2),
-            "suggested_rewrite": "Я не могу выполнить этот запрос."
-        }
-
-    # 4. Безопасно
+    # ✅ Безопасно
     return {
         "flagged": False,
         "reason": "safe",
