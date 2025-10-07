@@ -12,7 +12,6 @@ BASE_DIR = Path(__file__).parent
 VECTORIZER_PATH = BASE_DIR / "tfidf_vectorizer.pkl"
 CLASSIFIER_PATH = BASE_DIR / "jailbreak_classifier.pkl"
 
-# Проверка наличия файлов
 if not VECTORIZER_PATH.exists() or not CLASSIFIER_PATH.exists():
     raise FileNotFoundError(
         f"Не найдены файлы модели! Убедитесь, что {VECTORIZER_PATH} и {CLASSIFIER_PATH} находятся в папке 'app'."
@@ -25,23 +24,21 @@ classifier = joblib.load(CLASSIFIER_PATH)
 # 2. СПИСКИ УГРОЗ
 # ==============================
 
-# Токсичный контент
 TOXIC_KEYWORDS = [
     "оскорб", "обид", "дурак", "идиот", "урод", "гад", "мерзавец", "сволочь",
     "ненависть", "расизм", "ксенофобия", "гомофобия", "убей", "смерть", "насиль"
 ]
 
-# Персональные данные (ПДн)
 PDI_KEYWORDS = [
     "инн", "снилс", "паспорт", "номер карты", "cvv", "cvc", "дата рождения",
     "адрес проживания", "телефон", "email", "почта", "логин", "пароль"
 ]
 
-# Запрещённые темы
-BANNED_TOPICS = {
-    "violence": ["оружие", "взрыв", "убийство", "насилие"],
-    "drugs": ["наркотики", "марихуана", "кокаин"],
-    "illegal": ["взлом", "мошенничество", "киберпреступность", "фishing", "фишинг"]
+# Запрещённые темы — теперь с регулярными выражениями
+BANNED_PATTERNS = {
+    "violence": r'\b(?:оружие|взрыв|убийств|насили|взлом|взломай|взломайте)\w*\b',
+    "drugs": r'\b(?:наркотик|марихуан|кокаин)\w*\b',
+    "illegal": r'\b(?:взлом|мошенничество|киберпреступность|фishing|фишинг)\w*\b',
 }
 
 # ==============================
@@ -72,8 +69,23 @@ def clean_text(text: str) -> str:
     text = re.sub(r'[^а-яёa-z\s]', ' ', text, flags=re.IGNORECASE)
     return ' '.join(text.split()).lower()
 
-def contains_word(text: str, word: str) -> bool:
-    return bool(re.search(rf'\b{re.escape(word)}\b', text, re.IGNORECASE))
+def word_match(text: str, word: str) -> bool:
+    """Проверяет наличие слова с учётом окончаний и границ"""
+    pattern = rf'\b{re.escape(word)}\w*\b'
+    return bool(re.search(pattern, text, re.IGNORECASE))
+
+def check_banned_topics(text: str) -> dict | None:
+    """Проверяет текст на запрещённые темы с помощью регулярных выражений"""
+    for category, pattern in BANNED_PATTERNS.items():
+        if re.search(pattern, text, re.IGNORECASE):
+            risk = 0.85 if category in ["violence", "drugs"] else 0.75
+            return {
+                "flagged": True,
+                "reason": f"harmful_content_{category}",
+                "risk_score": risk,
+                "suggested_rewrite": "Эта тема выходит за рамки моих возможностей."
+            }
+    return None
 
 # ==============================
 # 4. ОСНОВНАЯ ФУНКЦИЯ
@@ -99,7 +111,7 @@ def detect_jailbreak(prompt: str) -> dict:
             }
 
     # ☠️ 2. Проверка токсичности
-    toxic_count = sum(1 for w in TOXIC_KEYWORDS if contains_word(cleaned, w))
+    toxic_count = sum(1 for w in TOXIC_KEYWORDS if word_match(cleaned, w))
     if toxic_count >= 1:
         risk = min(0.7 + toxic_count * 0.1, 0.9)
         return {
@@ -110,7 +122,7 @@ def detect_jailbreak(prompt: str) -> dict:
         }
 
     # 🕵️ 3. Проверка утечки ПДн
-    pdi_count = sum(1 for w in PDI_KEYWORDS if contains_word(cleaned, w))
+    pdi_count = sum(1 for w in PDI_KEYWORDS if word_match(cleaned, w))
     if pdi_count >= 1:
         return {
             "flagged": True,
@@ -119,22 +131,16 @@ def detect_jailbreak(prompt: str) -> dict:
             "suggested_rewrite": "Запрос содержит персональные данные. Он заблокирован в целях безопасности."
         }
 
-    # 🚫 4. Запрещённые темы
-    for category, words in BANNED_TOPICS.items():
-        if any(contains_word(cleaned, w) for w in words):
-            risk = 0.85 if category in ["violence", "drugs"] else 0.75
-            return {
-                "flagged": True,
-                "reason": f"harmful_content_{category}",
-                "risk_score": risk,
-                "suggested_rewrite": "Эта тема выходит за рамки моих возможностей."
-            }
+    # 🚫 4. Запрещённые темы (с регулярными выражениями)
+    banned_result = check_banned_topics(cleaned)
+    if banned_result:
+        return banned_result
 
     # 📊 5. TF-IDF + классификатор (для сложных jailbreak-атак)
     try:
         X = vectorizer.transform([cleaned])
         prob = classifier.predict_proba(X)[0][1]
-        if prob > 0.85:  # повышенный порог для снижения ложных срабатываний
+        if prob > 0.85:  # повышенный порог
             return {
                 "flagged": True,
                 "reason": "jailbreak_tfidf",
