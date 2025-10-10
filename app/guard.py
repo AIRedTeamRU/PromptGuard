@@ -3,6 +3,7 @@ import re
 import unicodedata
 import joblib
 from pathlib import Path
+from typing import Optional, Union
 
 # ==============================
 # 1. ПУТИ К МОДЕЛЯМ
@@ -74,7 +75,7 @@ def word_match(text: str, word: str) -> bool:
     pattern = rf'\b{re.escape(word)}\w*\b'
     return bool(re.search(pattern, text, re.IGNORECASE))
 
-def check_banned_topics(text: str) -> dict | None:
+def check_banned_topics(text: str) -> Optional[dict]:
     """Проверяет текст на запрещённые темы с помощью регулярных выражений"""
     for category, pattern in BANNED_PATTERNS.items():
         if re.search(pattern, text, re.IGNORECASE):
