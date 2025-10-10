@@ -1,9 +1,11 @@
+version: null
 meta:
   environment: python
   toolchain:
     name: pip
-    version: 3.9
+    version: "3.9"
 build:
   requirementsPath: requirements.txt
 run:
   containerPort: 8000
+  scriptName: main.py
