@@ -1,7 +1,6 @@
 --index-url https://pypi.org/simple/
 --trusted-host pypi.org
 --trusted-host files.pythonhosted.org
---timeout 120
 
 fastapi==0.110.0
 uvicorn==0.29.0
@@ -12,6 +11,7 @@ presidio-anonymizer
 wheels/presidio_analyzer-2.2.360-py3-none-any.whl
 scikit-learn
 joblib
+
 
 
 
