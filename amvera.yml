@@ -1,3 +1,8 @@
-# amvera.yml
-runtime: python3.10
-command: python main.py
+meta:
+  environment: python
+  toolchain:
+    name: pip
+    version: latest
+build:
+  requirementsPath: requirements.txt
+run: {}
