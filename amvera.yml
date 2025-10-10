@@ -2,7 +2,7 @@ meta:
   environment: python
   toolchain:
     name: pip
-    version: latest
+    version: 3.9
 build:
   requirementsPath: requirements.txt
 run: {}
