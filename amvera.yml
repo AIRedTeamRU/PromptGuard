@@ -5,4 +5,5 @@ meta:
     version: 3.9
 build:
   requirementsPath: requirements.txt
-run: {}
+run:
+  containerPort: 8000
